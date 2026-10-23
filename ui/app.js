@@ -1,0 +1,400 @@
+'use strict';
+
+let {invoke} = window.__TAURI__.core,
+	{listen} = window.__TAURI__.event,
+	$ = id => document.getElementById(id),
+	SHUTOFF_CHOICES = [10, 15, 20, 25, 30],
+	BAND_LABELS = ['Low shelf', 'Low mid', 'Mid', 'High mid', 'High shelf'],
+	state = null,
+	settings = null,
+	config = null,
+	selectedPreset = 1,
+	loadingSettings = false,
+	toastTimer;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function toast(msg, isError) {
+	let el = $('toast');
+	el.textContent = msg;
+	el.classList.toggle('error', !!isError);
+	el.hidden = false;
+	clearTimeout(toastTimer);
+	toastTimer = setTimeout(() => {
+		el.hidden = true;
+	}, isError ? 5000 : 1800);
+}
+
+async function apply(change) {
+	try {
+		await invoke('apply', {change});
+		return true;
+	}
+	catch (err) {
+		toast(String(err), true);
+		return false;
+	}
+}
+
+function headsetReachable() {
+	return !!(state && state.connected && state.status && (state.status.on || state.status.docked));
+}
+
+function setOutput(input) {
+	let out = document.querySelector(`output[data-for="${input.id}"]`);
+	if (!out) {
+		return;
+	}
+	if (input.id === 'balance') {
+		let chat = Math.round(input.value / 255 * 100);
+		out.textContent = `game ${100 - chat}% · chat ${chat}%`;
+	}
+	else {
+		out.textContent = `${input.value}%`;
+	}
+}
+
+// ── Status header ────────────────────────────────────────────────────────────
+
+function renderState() {
+	let st = state,
+		b = st.battery,
+		chips = [];
+
+	$('battery-text').textContent = b ? `${b.percent}%` : '—';
+	$('battery-fill').style.width = b ? `${b.percent}%` : '0';
+	$('battery').classList.toggle('low', !!b && !b.charging && b.percent <= 15);
+
+	if (!st.connected) {
+		$('headline').textContent = 'Base station not connected';
+		$('subline').textContent = st.error || 'Plug in the A50 base station.';
+	}
+	else if (!st.status) {
+		$('headline').textContent = 'Reading headset…';
+		$('subline').textContent = st.error || '';
+	}
+	else {
+		let s = st.status;
+		$('headline').textContent = s.docked
+			? (b && b.charging ? 'Docked · charging' : 'Docked')
+			: (s.on ? 'Headset on' : 'Headset off');
+		$('subline').textContent = st.audio_target
+			? `Audio → ${({a50: 'Astro A50', sony: 'Sony WH-CH720N', speakers: 'Speakers'})[st.audio_target]}`
+			: '';
+	}
+
+	if (st.connected) {
+		chips.push(['Base connected', true]);
+	}
+	if (st.battery_published) {
+		chips.push(['In system battery menu', true]);
+	}
+	if (st.sony_connected) {
+		chips.push(['Sony connected', true]);
+	}
+	$('chips').replaceChildren(...chips.map(([text, on]) => {
+		let el = document.createElement('span');
+		el.className = 'chip' + (on ? ' on' : '');
+		el.textContent = text;
+		return el;
+	}));
+
+	let banner = $('banner');
+	if (st.other_holders && st.other_holders.length) {
+		banner.textContent = `Another program also has the A50 open: ${st.other_holders.join(', ')}. `
+			+ 'Its traffic is filtered out, but quit it (or the old a50-watcher) for the most reliable results.';
+		banner.hidden = false;
+	}
+	else {
+		banner.hidden = true;
+	}
+
+	let reachable = headsetReachable();
+	for (let card of document.querySelectorAll('.needs-headset')) {
+		card.classList.toggle('disabled', !reachable || !settings);
+	}
+	if (reachable && !settings) {
+		loadSettings();
+	}
+	if (!reachable) {
+		settings = null;
+	}
+	$('battery-pub-hint').textContent = st.battery_published
+		? 'Showing now.'
+		: 'Needs the system setup below. Shown while the headset is on or docked.';
+}
+
+// ── Headset settings ─────────────────────────────────────────────────────────
+
+async function loadSettings() {
+	if (loadingSettings) {
+		return;
+	}
+	loadingSettings = true;
+	try {
+		settings = await invoke('read_settings');
+		selectedPreset = settings.active_eq;
+		renderSettings();
+	}
+	catch (err) {
+		settings = null;
+		toast(`Couldn't read headset settings: ${err}`, true);
+	}
+	finally {
+		loadingSettings = false;
+		if (state) {
+			renderState();
+		}
+	}
+}
+
+function renderSettings() {
+	let s = settings;
+
+	$('shutoff').replaceChildren(...SHUTOFF_CHOICES.map(min => {
+		let btn = document.createElement('button');
+		btn.setAttribute('role', 'radio');
+		btn.setAttribute('aria-checked', String(s.shutoff_minutes === min));
+		btn.textContent = `${min} min`;
+		btn.onclick = async () => {
+			if (await apply({kind: 'shutoff', minutes: min})) {
+				s.shutoff_minutes = min;
+				renderSettings();
+				toast(`Auto power-off set to ${min} minutes`);
+			}
+		};
+		return btn;
+	}));
+
+	for (let i = 0; i < 6; i++) {
+		let input = $(`slider-${i}`);
+		input.value = s.sliders[i];
+		setOutput(input);
+	}
+	$('noise-gate').value = s.noise_gate;
+	$('mic-eq').value = s.mic_eq;
+	$('balance').value = s.default_balance;
+	setOutput($('balance'));
+	$('alert-volume').value = s.alert_volume;
+	setOutput($('alert-volume'));
+
+	renderEq();
+}
+
+function renderEq() {
+	let s = settings,
+		preset = s.presets.find(p => p.id === selectedPreset);
+
+	$('eq-tabs').replaceChildren(...s.presets.map(p => {
+		let btn = document.createElement('button');
+		btn.setAttribute('role', 'tab');
+		btn.setAttribute('aria-selected', String(p.id === selectedPreset));
+		btn.textContent = p.name || `Preset ${p.id}`;
+		btn.onclick = () => {
+			selectedPreset = p.id;
+			renderEq();
+		};
+		return btn;
+	}));
+
+	$('eq-name').value = preset.name;
+	let active = s.active_eq === preset.id;
+	$('eq-activate').hidden = active;
+	$('eq-active-badge').hidden = !active;
+
+	$('bands').replaceChildren(...preset.gains.map((gain, i) => {
+		let band = document.createElement('div'),
+			shelf = i === 0 || i === 4;
+		band.className = 'band';
+		band.innerHTML = `
+			<small>${BAND_LABELS[i]}</small>
+			<span class="gain"></span>
+			<div class="fader"><input type="range" min="-7" max="7" step="1" aria-label="${BAND_LABELS[i]} gain"></div>
+			<div class="band-inputs">
+				<label><small>Hz</small><input type="number" min="80" max="15000" step="1" class="freq"></label>
+				${shelf ? '' : '<label><small>Q</small><input type="number" min="0.1" max="3" step="0.1" class="q"></label>'}
+			</div>`;
+		let range = band.querySelector('input[type="range"]'),
+			gainLabel = band.querySelector('.gain'),
+			freq = band.querySelector('.freq'),
+			q = band.querySelector('.q'),
+			showGain = v => {
+				gainLabel.textContent = `${v > 0 ? '+' : ''}${v} dB`;
+			};
+
+		range.value = gain;
+		showGain(gain);
+		range.oninput = () => showGain(Number(range.value));
+		range.onchange = async () => {
+			let gains = [...preset.gains];
+			gains[i] = Number(range.value);
+			if (await apply({kind: 'eq_gains', preset: preset.id, gains})) {
+				preset.gains = gains;
+			}
+			else {
+				range.value = preset.gains[i];
+				showGain(preset.gains[i]);
+			}
+		};
+
+		freq.value = preset.bands[i].freq;
+		if (q) {
+			q.value = (preset.bands[i].bandwidth / 4096).toFixed(1);
+		}
+		let sendBand = async () => {
+			let f = Math.round(Number(freq.value)),
+				bw = q ? Math.round(Number(q.value) * 4096) : 0;
+			if (!(f >= 80 && f <= 15000)) {
+				toast('Frequency must be 80–15000 Hz', true);
+				freq.value = preset.bands[i].freq;
+				return;
+			}
+			if (await apply({kind: 'eq_band', preset: preset.id, band: i + 1, freq: f, bandwidth: bw})) {
+				preset.bands[i] = {freq: f, bandwidth: bw};
+			}
+		};
+		freq.onchange = sendBand;
+		if (q) {
+			q.onchange = sendBand;
+		}
+		return band;
+	}));
+}
+
+// ── App config & system setup ────────────────────────────────────────────────
+
+async function saveConfig() {
+	try {
+		await invoke('set_config', {cfg: config});
+	}
+	catch (err) {
+		toast(`Couldn't save preferences: ${err}`, true);
+	}
+}
+
+async function renderSetup() {
+	let sys = await invoke('system_status'),
+		el = $('setup'),
+		ready = sys.hidraw_ok && sys.uhid_ok && sys.rules_installed;
+
+	$('autostart').checked = sys.autostart;
+	el.innerHTML = `
+		<div class="line"><span class="${sys.hidraw_ok ? 'ok' : 'bad'}">${sys.hidraw_ok ? '✓' : '✗'}</span>
+			Access to the A50 base station</div>
+		<div class="line"><span class="${sys.uhid_ok ? 'ok' : 'bad'}">${sys.uhid_ok ? '✓' : '✗'}</span>
+			Permission to publish the battery (/dev/uhid)</div>
+		<div class="line"><span class="${sys.rules_installed ? 'ok' : 'bad'}">${sys.rules_installed ? '✓' : '✗'}</span>
+			Battery shown as a headset (udev rules)</div>
+		${sys.in_plugdev ? '' : '<div class="line bad">Your user is not in the plugdev group: run <code>sudo usermod -aG plugdev $USER</code> and log in again.</div>'}
+		${ready ? '' : '<div class="line"><button class="primary" id="install-rules">Set up system permissions…</button><small>Installs udev rules; asks for your password.</small></div>'}`;
+	let btn = $('install-rules');
+	if (btn) {
+		btn.onclick = async () => {
+			btn.disabled = true;
+			try {
+				await invoke('install_rules');
+				toast('System permissions installed');
+			}
+			catch (err) {
+				toast(`Setup failed: ${err}`, true);
+			}
+			renderSetup();
+		};
+	}
+}
+
+function bindControls() {
+	for (let i = 0; i < 6; i++) {
+		let input = $(`slider-${i}`);
+		input.oninput = () => setOutput(input);
+		input.onchange = async () => {
+			let value = Number(input.value);
+			if (await apply({kind: 'slider', id: i, value})) {
+				settings.sliders[i] = value;
+			}
+		};
+	}
+	$('balance').oninput = () => setOutput($('balance'));
+	$('balance').onchange = async () => {
+		let value = Number($('balance').value);
+		if (await apply({kind: 'default_balance', value})) {
+			settings.default_balance = value;
+		}
+	};
+	$('alert-volume').oninput = () => setOutput($('alert-volume'));
+	$('alert-volume').onchange = async () => {
+		let value = Number($('alert-volume').value);
+		if (await apply({kind: 'alert_volume', value})) {
+			settings.alert_volume = value;
+		}
+	};
+	$('noise-gate').onchange = async () => {
+		let mode = Number($('noise-gate').value);
+		if (await apply({kind: 'noise_gate', mode})) {
+			settings.noise_gate = mode;
+		}
+	};
+	$('mic-eq').onchange = async () => {
+		let value = Number($('mic-eq').value);
+		if (await apply({kind: 'mic_eq', value})) {
+			settings.mic_eq = value;
+		}
+	};
+	$('eq-activate').onclick = async () => {
+		if (await apply({kind: 'active_eq', preset: selectedPreset})) {
+			settings.active_eq = selectedPreset;
+			renderEq();
+		}
+	};
+	$('eq-name').onchange = async () => {
+		let name = $('eq-name').value.trim().toUpperCase(),
+			preset = settings.presets.find(p => p.id === selectedPreset);
+		if (await apply({kind: 'eq_name', preset: selectedPreset, name})) {
+			preset.name = name;
+		}
+		renderEq();
+	};
+
+	let bindToggle = (id, key) => {
+		$(id).checked = config[key];
+		$(id).onchange = () => {
+			config[key] = $(id).checked;
+			saveConfig();
+		};
+	};
+	bindToggle('cfg-audio', 'audio_switching');
+	bindToggle('cfg-battery', 'publish_battery');
+	bindToggle('cfg-alerts', 'low_battery_alerts');
+	$('cfg-sony').value = config.sony_address;
+	$('cfg-sony').onchange = () => {
+		config.sony_address = $('cfg-sony').value.trim().toUpperCase();
+		saveConfig();
+	};
+	$('autostart').onchange = async () => {
+		try {
+			await invoke('set_autostart', {enabled: $('autostart').checked});
+		}
+		catch (err) {
+			toast(String(err), true);
+		}
+	};
+}
+
+// ── Start ────────────────────────────────────────────────────────────────────
+
+(async () => {
+	config = await invoke('get_config');
+	bindControls();
+	renderSetup();
+	state = await invoke('get_state');
+	renderState();
+	await listen('state', ev => {
+		let wasReachable = headsetReachable();
+		state = ev.payload;
+		if (!wasReachable && headsetReachable()) {
+			settings = null;
+		}
+		renderState();
+	});
+	window.addEventListener('focus', renderSetup);
+})();

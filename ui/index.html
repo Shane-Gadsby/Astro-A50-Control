@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>A50 Control</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<header class="hero">
+		<div class="hero-main">
+			<div class="battery" id="battery" aria-label="Headset battery">
+				<div class="battery-fill" id="battery-fill"></div>
+				<span id="battery-text">—</span>
+			</div>
+			<div>
+				<h1 id="headline">Looking for the base station…</h1>
+				<p class="sub" id="subline"></p>
+			</div>
+		</div>
+		<div class="chips" id="chips"></div>
+	</header>
+
+	<div class="banner warn" id="banner" hidden></div>
+
+	<main>
+		<section class="card needs-headset" id="power">
+			<h2>Auto power-off</h2>
+			<p class="hint">The headset switches itself off after this long while it's upright and not moving.
+				Separately, its firmware switches it off after about 15 seconds of stillness when tilted more than
+				about 15° (it assumes it has been put down) — that limit is built in and can't be changed from here.</p>
+			<div class="segmented" id="shutoff" role="radiogroup" aria-label="Auto power-off"></div>
+		</section>
+
+		<section class="card needs-headset" id="eq">
+			<div class="card-head">
+				<h2>Equaliser</h2>
+				<div class="tabs" id="eq-tabs" role="tablist"></div>
+			</div>
+			<div class="row">
+				<label class="inline">Name <input id="eq-name" maxlength="16" spellcheck="false"></label>
+				<button id="eq-activate" class="primary">Use this preset</button>
+				<span class="badge" id="eq-active-badge" hidden>Active</span>
+			</div>
+			<div class="bands" id="bands"></div>
+		</section>
+
+		<section class="card needs-headset" id="mic">
+			<h2>Microphone</h2>
+			<div class="mixer">
+				<div class="fader-cell"><output data-for="slider-4"></output>
+					<div class="fader"><input type="range" min="0" max="100" id="slider-4" aria-label="Mic level"></div>
+					<span>Mic level</span></div>
+				<div class="fader-cell"><output data-for="slider-5"></output>
+					<div class="fader"><input type="range" min="0" max="100" id="slider-5" aria-label="Sidetone"></div>
+					<span>Sidetone</span></div>
+			</div>
+			<div class="grid">
+				<label>Noise gate
+					<select id="noise-gate">
+						<option value="0">Streaming</option>
+						<option value="1">Night</option>
+						<option value="2">Home</option>
+						<option value="3">Tournament</option>
+					</select></label>
+				<label>Mic EQ
+					<select id="mic-eq">
+						<option value="0">Preset 1</option>
+						<option value="1">Preset 2</option>
+						<option value="2">Preset 3</option>
+					</select></label>
+			</div>
+		</section>
+
+		<section class="card needs-headset" id="mix">
+			<h2>Mix</h2>
+			<label class="balance">Default game / chat balance <output data-for="balance"></output>
+				<input type="range" min="0" max="255" id="balance"></label>
+			<div class="mixer-groups">
+				<div>
+					<h3>Stream port mix</h3>
+					<div class="mixer">
+						<div class="fader-cell"><output data-for="slider-0"></output>
+							<div class="fader"><input type="range" min="0" max="100" id="slider-0" aria-label="Microphone"></div>
+							<span>Microphone</span></div>
+						<div class="fader-cell"><output data-for="slider-1"></output>
+							<div class="fader"><input type="range" min="0" max="100" id="slider-1" aria-label="Chat"></div>
+							<span>Chat</span></div>
+						<div class="fader-cell"><output data-for="slider-2"></output>
+							<div class="fader"><input type="range" min="0" max="100" id="slider-2" aria-label="Game"></div>
+							<span>Game</span></div>
+						<div class="fader-cell"><output data-for="slider-3"></output>
+							<div class="fader"><input type="range" min="0" max="100" id="slider-3" aria-label="Aux"></div>
+							<span>Aux</span></div>
+					</div>
+				</div>
+				<div>
+					<h3>Alerts</h3>
+					<div class="mixer">
+						<div class="fader-cell"><output data-for="alert-volume"></output>
+							<div class="fader"><input type="range" min="0" max="100" id="alert-volume" aria-label="Alert volume"></div>
+							<span>Alert volume</span></div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section class="card" id="app">
+			<h2>This computer</h2>
+			<div class="toggles">
+				<label class="toggle"><input type="checkbox" id="cfg-audio"><span>Switch audio output automatically</span>
+					<small>A50 when it's on and off the dock, otherwise the Sony headphones if connected, otherwise speakers.</small></label>
+				<label class="toggle"><input type="checkbox" id="cfg-battery"><span>Show battery in the system battery menu</span>
+					<small id="battery-pub-hint"></small></label>
+				<label class="toggle"><input type="checkbox" id="cfg-alerts"><span>Low battery notifications</span>
+					<small>At 15% and 5% while not charging.</small></label>
+				<label class="toggle"><input type="checkbox" id="autostart"><span>Start at login</span>
+					<small>Runs in the tray; close the window to keep it running.</small></label>
+			</div>
+			<label class="inline">Sony WH-CH720N address
+				<input id="cfg-sony" spellcheck="false" placeholder="AA:BB:CC:DD:EE:FF"></label>
+			<div class="setup" id="setup"></div>
+		</section>
+	</main>
+
+	<div class="toast" id="toast" role="status" hidden></div>
+	<script src="app.js"></script>
+</body>
+</html>

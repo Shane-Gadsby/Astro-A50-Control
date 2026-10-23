@@ -1,0 +1,16 @@
+# A50 Control udev rules.
+#
+# Astro A50 Gen 4 base station HID interface: lets plugdev members read headset
+# status and battery and change settings.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="9886", ATTRS{idProduct}=="002c", MODE="0660", GROUP="plugdev"
+
+# /dev/uhid: lets plugdev members create the virtual HID device that publishes
+# the headset battery to UPower / GNOME.
+KERNEL=="uhid", SUBSYSTEM=="misc", GROUP="plugdev", MODE="0660", OPTIONS+="static_node=uhid"
+
+# Make UPower classify the virtual battery (HID 9886:a50b) as a headset rather
+# than a laptop battery. UPower 1.90 types a peripheral battery from its
+# sibling input device: SOUND_INITIALIZED marks it as audio and
+# SOUND_FORM_FACTOR picks the audio sub-type (see up-device-supply.c,
+# up_device_supply_sibling_discovered_guess_type).
+SUBSYSTEM=="input", KERNEL=="input*", ENV{PRODUCT}=="3/9886/a50b/*", ENV{SOUND_INITIALIZED}="1", ENV{SOUND_FORM_FACTOR}="headset"
