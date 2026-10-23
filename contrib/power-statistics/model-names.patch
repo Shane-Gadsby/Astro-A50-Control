@@ -1,0 +1,47 @@
+--- a/src/gpm-statistics.c	2022-09-16 23:41:24.000000000 +1000
++++ b/src/gpm-statistics.c	2026-10-24 09:53:08.768210124 +1000
+@@ -277,8 +277,14 @@
+ 		break;
+ #endif
+ 	default:
+-		g_warning ("enum unrecognised: %u", kind);
++		/* Kinds newer than this list (headset, speakers, …): capitalise
++		 * UPower's raw name instead of showing it lowercase. */
+ 		text = up_device_kind_to_string (kind);
++		if (text != NULL && g_ascii_islower (text[0])) {
++			g_autofree gchar *tmp = g_strdup (text);
++			tmp[0] = g_ascii_toupper (tmp[0]);
++			text = g_intern_string (tmp);
++		}
+ 	}
+ 	return text;
+ }
+@@ -1065,18 +1071,27 @@
+ 	GtkTreeIter iter;
+ 	const gchar *text;
+ 	UpDeviceKind kind;
++	g_autofree gchar *model = NULL;
+ 	g_autoptr(GIcon) icon = NULL;
+ 
+ 	/* get device properties */
+ 	g_object_get (device,
+ 		      "kind", &kind,
++		      "model", &model,
+ 		      NULL);
+ 	g_ptr_array_add (devices, g_object_ref (device));
+ 	g_signal_connect (device, "notify",
+ 			  G_CALLBACK (gpm_stats_device_changed_cb), NULL);
+ 
+ 	id = up_device_get_object_path (device);
+-	text = gpm_device_kind_to_localised_string (kind, 1);
++	/* Peripherals: prefer the model name ("Astro A50 Headset") over the
++	 * generic kind; system batteries and power keep their kind label. */
++	if (model != NULL && model[0] != '\0' &&
++	    kind != UP_DEVICE_KIND_BATTERY && kind != UP_DEVICE_KIND_LINE_POWER &&
++	    kind != UP_DEVICE_KIND_UPS)
++		text = model;
++	else
++		text = gpm_device_kind_to_localised_string (kind, 1);
+ 	icon = gpm_stats_get_device_icon (device, FALSE);
+ 
+ 	gtk_list_store_append (list_store_devices, &iter);
