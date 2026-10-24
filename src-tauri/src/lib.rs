@@ -14,10 +14,13 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
+use tauri::image::Image;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 
 const RULES: &str = include_str!("../../packaging/70-a50-control.rules");
+const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
+const TRAY_ICON_CHARGING: &[u8] = include_bytes!("../icons/tray-charging.png");
 
 pub fn log(msg: &str) {
 	let now = std::time::SystemTime::now()
@@ -50,6 +53,8 @@ struct TrayItems {
 	tray: TrayIcon,
 	battery: MenuItem<tauri::Wry>,
 	headset: MenuItem<tauri::Wry>,
+	/// Whether the charging icon is showing, so the icon is only swapped on change.
+	charging_icon: Mutex<bool>,
 }
 
 fn ok<T: serde::Serialize>(v: T) -> device::Result<Value> {
@@ -182,6 +187,19 @@ fn update_tray(app: &AppHandle, st: &State) {
 			if s.docked { ", docked" } else { "" }
 		),
 	};
+	// Docked and charging: show a charging icon instead of the percentage label
+	// (the exact level stays in the tooltip and menu).
+	let charging = st.status.map(|s| s.docked).unwrap_or(false) && st.battery.map(|b| b.charging).unwrap_or(false);
+	let title = if charging { None } else { title };
+	let mut showing = items.charging_icon.lock().unwrap();
+	if *showing != charging {
+		let bytes = if charging { TRAY_ICON_CHARGING } else { TRAY_ICON };
+		if let Ok(icon) = Image::from_bytes(bytes) {
+			let _ = items.tray.set_icon(Some(icon));
+			*showing = charging;
+		}
+	}
+	drop(showing);
 	let _ = items.battery.set_text(&battery);
 	let _ = items.headset.set_text(&headset);
 	let _ = items.tray.set_title(title.as_deref());
@@ -217,7 +235,7 @@ pub fn run() {
 				&[&battery, &headset, &PredefinedMenuItem::separator(app)?, &open, &quit],
 			)?;
 			let tray = TrayIconBuilder::with_id("a50")
-				.icon(app.default_window_icon().cloned().expect("app icon"))
+				.icon(Image::from_bytes(TRAY_ICON)?)
 				.menu(&menu)
 				.tooltip("A50 Control")
 				.on_menu_event(|app, event| match event.id.as_ref() {
@@ -226,7 +244,7 @@ pub fn run() {
 					_ => {}
 				})
 				.build(app)?;
-			app.manage(TrayItems { tray, battery, headset });
+			app.manage(TrayItems { tray, battery, headset, charging_icon: Mutex::new(false) });
 
 			let state = Arc::new(Mutex::new(State::default()));
 			let config = Arc::new(Mutex::new(config::load()));
