@@ -1,7 +1,7 @@
 //! Default-sink switching, ported from the a50-watcher Node daemon.
 //!
 //! Priority: A50 (on and off the dock) > connected Bluetooth headsets, in the
-//! user's order > speakers. Sinks are identified by stable device properties from
+//! user's order > speakers (chosen by the user, or detected). Sinks are identified by stable device properties from
 //! `pactl -f json` (USB vendor/product, Bluetooth address, card profile), never by
 //! node name: PipeWire rewrites names whenever a device is re-created (e.g.
 //! `...A50-00.stereo-chat` → `...A50-00.stereo-chat.2`).
@@ -9,7 +9,7 @@
 //! Decisions compare against PipeWire's *actual* default sink, so if a sink is
 //! re-created and WirePlumber moves the default, the next sink event puts it back.
 
-use crate::config::BluetoothDevice;
+use crate::config::{BluetoothDevice, SpeakerChoice};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
@@ -19,6 +19,7 @@ use std::time::Duration;
 
 pub struct Sink {
 	pub name: String,
+	description: String,
 	props: Value,
 }
 
@@ -28,18 +29,54 @@ impl Sink {
 	}
 }
 
-/// Chat profile only; the base also exposes a stereo-game sink.
-fn is_a50(sink: &Sink) -> bool {
-	sink.prop("device.vendor.id") == "0x9886"
-		&& sink.prop("device.product.id") == "0x002c"
-		&& sink.prop("device.profile.name").contains("chat")
+fn is_a50_base(sink: &Sink) -> bool {
+	sink.prop("device.vendor.id") == "0x9886" && sink.prop("device.product.id") == "0x002c"
 }
 
-/// Onboard Family 17h/19h HD Audio, analog (line-out) profiles only.
-fn is_speakers(sink: &Sink) -> bool {
-	sink.prop("device.vendor.id") == "0x1022"
-		&& sink.prop("device.product.id") == "0x15e3"
-		&& sink.prop("device.profile.name").starts_with("analog-")
+/// Chat profile only; the base also exposes a stereo-game sink.
+fn is_a50(sink: &Sink) -> bool {
+	is_a50_base(sink) && sink.prop("device.profile.name").contains("chat")
+}
+
+fn is_any_bluetooth(sink: &Sink) -> bool {
+	!sink.prop("api.bluez5.address").is_empty() || sink.name.starts_with("bluez_output.")
+}
+
+/// "analog-surround-21" → "analog": a card's stereo and surround profiles are the
+/// same physical output.
+fn profile_family(profile: &str) -> &str {
+	profile.split(['-', '+', ':']).next().unwrap_or(profile)
+}
+
+fn is_speaker_candidate(sink: &Sink) -> bool {
+	!is_a50_base(sink) && !is_any_bluetooth(sink)
+}
+
+fn is_choice(sink: &Sink, choice: &SpeakerChoice) -> bool {
+	if choice.vendor_id.is_empty() {
+		// Virtual sinks have no device ids; their name is all there is.
+		return sink.name == choice.sink_name;
+	}
+	sink.prop("device.vendor.id") == choice.vendor_id
+		&& sink.prop("device.product.id") == choice.product_id
+		&& profile_family(sink.prop("device.profile.name")) == profile_family(&choice.profile)
+}
+
+fn speaker_score(sink: &Sink, default: Option<&str>) -> u32 {
+	let family = profile_family(sink.prop("device.profile.name"));
+	let kind = match family {
+		"analog" if sink.prop("device.bus") == "pci" => 4,
+		"analog" => 3,
+		"hdmi" | "iec958" => 1,
+		_ => 2,
+	};
+	// An output already in use is the strongest hint: the user picked it.
+	kind + if default == Some(sink.name.as_str()) { 10 } else { 0 }
+}
+
+/// Best guess at the speakers. Earlier sinks win ties.
+fn detect_speakers<'a>(sinks: &'a [Sink], default: Option<&str>) -> Option<&'a Sink> {
+	sinks.iter().filter(|s| is_speaker_candidate(s)).rev().max_by_key(|s| speaker_score(s, default))
 }
 
 fn is_bluetooth(sink: &Sink, address: &str) -> bool {
@@ -52,8 +89,43 @@ pub fn find_a50(sinks: &[Sink]) -> Option<String> {
 	sinks.iter().find(|s| is_a50(s)).map(|s| s.name.clone())
 }
 
-pub fn find_speakers(sinks: &[Sink]) -> Option<String> {
-	sinks.iter().find(|s| is_speakers(s)).map(|s| s.name.clone())
+/// The user's chosen speakers if present, otherwise the best guess, so unplugging
+/// a chosen output doesn't leave audio stuck on a device that's gone.
+pub fn find_speakers(sinks: &[Sink], choice: Option<&SpeakerChoice>, default: Option<&str>) -> Option<String> {
+	choice
+		.and_then(|c| sinks.iter().find(|s| is_choice(s, c)))
+		.or_else(|| detect_speakers(sinks, default))
+		.map(|s| s.name.clone())
+}
+
+/// What the UI needs to offer a choice of speakers.
+#[derive(Serialize)]
+pub struct SpeakerOptions {
+	pub outputs: Vec<SpeakerChoice>,
+	/// Sink name of the best guess.
+	pub detected: Option<String>,
+	/// Sink name matching the saved choice, if it's present.
+	pub selected: Option<String>,
+}
+
+pub fn speaker_options(choice: Option<&SpeakerChoice>) -> SpeakerOptions {
+	let sinks = list_sinks();
+	let default = default_sink();
+	SpeakerOptions {
+		outputs: sinks
+			.iter()
+			.filter(|s| is_speaker_candidate(s))
+			.map(|s| SpeakerChoice {
+				vendor_id: s.prop("device.vendor.id").to_string(),
+				product_id: s.prop("device.product.id").to_string(),
+				profile: s.prop("device.profile.name").to_string(),
+				sink_name: s.name.clone(),
+				label: if s.description.is_empty() { s.name.clone() } else { s.description.clone() },
+			})
+			.collect(),
+		detected: detect_speakers(&sinks, default.as_deref()).map(|s| s.name.clone()),
+		selected: choice.and_then(|c| sinks.iter().find(|s| is_choice(s, c))).map(|s| s.name.clone()),
+	}
 }
 
 /// The highest-priority device in `devices` that currently has a sink.
@@ -131,8 +203,9 @@ pub fn list_sinks() -> Vec<Sink> {
 		.into_iter()
 		.filter_map(|s| {
 			let name = s.get("name")?.as_str()?.to_string();
+			let description = s.get("description").and_then(Value::as_str).unwrap_or("").to_string();
 			let props = s.get("properties").cloned().unwrap_or(Value::Null);
-			Some(Sink { name, props })
+			Some(Sink { name, description, props })
 		})
 		.collect()
 }
@@ -191,12 +264,44 @@ mod tests {
 	use super::*;
 	use serde_json::json;
 
+	fn sink(name: &str, props: Value) -> Sink {
+		Sink { name: name.into(), description: String::new(), props }
+	}
+
+	fn output(name: &str, bus: &str, vendor: &str, product: &str, profile: &str) -> Sink {
+		sink(
+			name,
+			json!({
+				"device.bus": bus,
+				"device.vendor.id": vendor,
+				"device.product.id": product,
+				"device.profile.name": profile,
+			}),
+		)
+	}
+
+	fn a50() -> Sink {
+		output("a50.chat", "usb", "0x9886", "0x002c", "stereo-chat")
+	}
+
+	fn onboard() -> Sink {
+		output("onboard.analog-stereo", "pci", "0x1022", "0x15e3", "analog-stereo")
+	}
+
+	fn hdmi() -> Sink {
+		output("gpu.hdmi", "pci", "0x10de", "0x228b", "hdmi-stereo")
+	}
+
+	fn usb_dac() -> Sink {
+		output("dac.analog-stereo", "usb", "0x1234", "0x0001", "analog-stereo")
+	}
+
 	fn device(address: &str, nickname: &str) -> BluetoothDevice {
 		BluetoothDevice { address: address.into(), name: "Headset".into(), nickname: nickname.into() }
 	}
 
 	fn bt_sink(address: &str) -> Sink {
-		Sink { name: format!("bluez_output.{}.1", address.replace(':', "_")), props: json!({ "api.bluez5.address": address }) }
+		sink(&format!("bluez_output.{}.1", address.replace(':', "_")), json!({ "api.bluez5.address": address }))
 	}
 
 	const FIRST: &str = "AA:AA:AA:AA:AA:01";
@@ -220,15 +325,14 @@ mod tests {
 	#[test]
 	fn unlisted_and_blank_addresses_never_match() {
 		// A sink with no Bluetooth address must not match a blank config entry.
-		let usb = Sink { name: "alsa_output.usb".into(), props: json!({}) };
+		let usb = sink("alsa_output.usb", json!({}));
 		assert!(first_connected(&[device("", "")], &[usb]).is_none());
 		assert!(first_connected(&[device(FIRST, "")], &[bt_sink(SECOND)]).is_none());
 	}
 
 	#[test]
 	fn matches_lowercase_address_by_sink_name() {
-		let sink = Sink { name: "bluez_output.AA_AA_AA_AA_AA_01.1".into(), props: json!({}) };
-		assert!(is_bluetooth(&sink, "aa:aa:aa:aa:aa:01"));
+		assert!(is_bluetooth(&sink("bluez_output.AA_AA_AA_AA_AA_01.1", json!({})), "aa:aa:aa:aa:aa:01"));
 	}
 
 	#[test]
@@ -261,6 +365,51 @@ mod tests {
 		let found = parse_paired(&reply);
 		assert_eq!(found.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["AB", "BC"]);
 		assert!(found[0].connected && !found[1].connected);
+	}
+
+	#[test]
+	fn detection_prefers_onboard_analog_over_hdmi_and_usb() {
+		let sinks = [hdmi(), usb_dac(), onboard()];
+		assert_eq!(find_speakers(&sinks, None, None).unwrap(), "onboard.analog-stereo");
+	}
+
+	#[test]
+	fn detection_prefers_the_current_default() {
+		let sinks = [onboard(), hdmi()];
+		assert_eq!(find_speakers(&sinks, None, Some("gpu.hdmi")).unwrap(), "gpu.hdmi");
+	}
+
+	#[test]
+	fn detection_never_picks_the_headset_or_bluetooth() {
+		let sinks = [a50(), bt_sink(FIRST)];
+		assert!(find_speakers(&sinks, None, Some("a50.chat")).is_none());
+		let sinks = [a50(), bt_sink(FIRST), hdmi()];
+		assert_eq!(find_speakers(&sinks, None, Some("a50.chat")).unwrap(), "gpu.hdmi");
+	}
+
+	#[test]
+	fn choice_beats_detection_and_survives_profile_change() {
+		let choice = SpeakerChoice {
+			vendor_id: "0x1022".into(),
+			product_id: "0x15e3".into(),
+			profile: "analog-surround-21".into(),
+			..Default::default()
+		};
+		let sinks = [hdmi(), onboard()];
+		assert_eq!(find_speakers(&sinks, Some(&choice), Some("gpu.hdmi")).unwrap(), "onboard.analog-stereo");
+	}
+
+	#[test]
+	fn missing_choice_falls_back_to_detection() {
+		let choice = SpeakerChoice { vendor_id: "0x1234".into(), product_id: "0x0001".into(), profile: "analog-stereo".into(), ..Default::default() };
+		assert_eq!(find_speakers(&[onboard()], Some(&choice), None).unwrap(), "onboard.analog-stereo");
+	}
+
+	#[test]
+	fn virtual_sink_choice_matches_by_name() {
+		let virtual_sink = sink("easyeffects_sink", json!({}));
+		let choice = SpeakerChoice { sink_name: "easyeffects_sink".into(), ..Default::default() };
+		assert_eq!(find_speakers(&[onboard(), virtual_sink], Some(&choice), None).unwrap(), "easyeffects_sink");
 	}
 
 	#[test]

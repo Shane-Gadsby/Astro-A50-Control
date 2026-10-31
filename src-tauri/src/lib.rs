@@ -130,6 +130,12 @@ async fn paired_bluetooth_devices() -> Vec<audio::PairedDevice> {
 }
 
 #[tauri::command]
+async fn speaker_options(ctx: tauri::State<'_, Ctx>) -> Result<audio::SpeakerOptions, String> {
+	let choice = ctx.config.lock().unwrap().speakers.clone();
+	Ok(audio::speaker_options(choice.as_ref()))
+}
+
+#[tauri::command]
 fn system_status() -> service::SystemStatus {
 	service::system_status()
 }
@@ -225,6 +231,7 @@ pub fn run() {
 			read_settings,
 			apply,
 			paired_bluetooth_devices,
+			speaker_options,
 			system_status,
 			set_autostart,
 			install_rules
@@ -254,6 +261,8 @@ pub fn run() {
 
 			let state = Arc::new(Mutex::new(State::default()));
 			let config = Arc::new(Mutex::new(config::load()));
+			// The first-start speaker question needs a visible window.
+			let first_start = !config.lock().unwrap().speakers_prompted;
 			let emit_handle = handle.clone();
 			let notify_handle = handle.clone();
 			let tx = service::spawn(
@@ -274,7 +283,7 @@ pub fn run() {
 			if let Err(e) = config::refresh_autostart() {
 				log(&format!("could not update autostart entry: {e}"));
 			}
-			if !background {
+			if !background || first_start {
 				show_window(&handle);
 			}
 			log(&format!("started{}", if background { " in background" } else { "" }));

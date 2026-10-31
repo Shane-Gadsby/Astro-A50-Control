@@ -339,7 +339,8 @@ impl Service {
 			(device.label(), Some(sink))
 		}
 		else {
-			("Speakers", audio::find_speakers(&sinks))
+			let default = audio::default_sink();
+			("Speakers", audio::find_speakers(&sinks, cfg.speakers.as_ref(), default.as_deref()))
 		};
 		self.st.audio_target = Some(label.to_string());
 		let Some(sink) = sink else {

@@ -4,11 +4,16 @@ let {invoke} = window.__TAURI__.core,
 	{listen} = window.__TAURI__.event,
 	$ = id => document.getElementById(id),
 	SHUTOFF_CHOICES = [10, 15, 20, 25, 30],
+	SETTINGS_RETRY_MS = 2000,
+	SETTINGS_RETRY_MAX_MS = 30000,
 	BAND_LABELS = ['Low shelf', 'Low mid', 'Mid', 'High mid', 'High shelf'],
 	state = null,
 	settings = null,
 	config = null,
 	pairedDevices = [],
+	speakerOptions = {outputs: [], detected: null, selected: null},
+	settingsFailures = 0,
+	settingsRetryAt = 0,
 	selectedPreset = 1,
 	loadingSettings = false,
 	toastTimer;
@@ -114,7 +119,7 @@ function renderState() {
 	for (let card of document.querySelectorAll('.needs-headset')) {
 		card.classList.toggle('disabled', !reachable || !settings);
 	}
-	if (reachable && !settings) {
+	if (reachable && !settings && Date.now() >= settingsRetryAt) {
 		loadSettings();
 	}
 	if (!reachable) {
@@ -135,11 +140,20 @@ async function loadSettings() {
 	try {
 		settings = await invoke('read_settings');
 		selectedPreset = settings.active_eq;
+		settingsFailures = 0;
+		settingsRetryAt = 0;
 		renderSettings();
 	}
 	catch (err) {
 		settings = null;
-		toast(`Couldn't read headset settings: ${err}`, true);
+		// renderState retries, so back off or a failing headset gets hammered.
+		let delay = Math.min(SETTINGS_RETRY_MS * 2 ** settingsFailures, SETTINGS_RETRY_MAX_MS);
+		settingsRetryAt = Date.now() + delay;
+		setTimeout(() => state && renderState(), delay);
+		if (!settingsFailures) {
+			toast(`Couldn't read headset settings: ${err}`, true);
+		}
+		settingsFailures++;
 	}
 	finally {
 		loadingSettings = false;
@@ -364,6 +378,59 @@ async function refreshBluetooth() {
 	}
 }
 
+async function setSpeakers(choice) {
+	config.speakers = choice;
+	config.speakers_prompted = true;
+	await saveConfig();
+	await refreshSpeakers();
+}
+
+function renderSpeakers() {
+	let {outputs, detected, selected} = speakerOptions,
+		select = $('speakers-select'),
+		found = outputs.find(o => o.sink_name === detected),
+		auto = new Option(found ? `Automatic (${found.label})` : 'Automatic', 'auto'),
+		options = [auto, ...outputs.map((o, i) => new Option(o.label, String(i)))],
+		current = outputs.findIndex(o => o.sink_name === selected);
+
+	if (config.speakers && current < 0) {
+		options.push(new Option(`${config.speakers.label} (not connected)`, 'saved'));
+	}
+	select.replaceChildren(...options);
+	select.value = !config.speakers ? 'auto' : (current < 0 ? 'saved' : String(current));
+}
+
+function promptForSpeakers() {
+	let dialog = $('speakers-dialog'),
+		{outputs, detected} = speakerOptions,
+		checked = Math.max(outputs.findIndex(o => o.sink_name === detected), 0);
+
+	$('speaker-choices').replaceChildren(...outputs.map((output, i) => {
+		let row = document.createElement('label'),
+			radio = document.createElement('input'),
+			text = document.createElement('span');
+		row.className = 'speaker-choice';
+		radio.type = 'radio';
+		radio.name = 'speaker-choice';
+		radio.value = String(i);
+		radio.checked = i === checked;
+		text.textContent = output.sink_name === detected ? `${output.label} (detected)` : output.label;
+		row.append(radio, text);
+		return row;
+	}));
+	dialog.showModal();
+}
+
+async function refreshSpeakers() {
+	speakerOptions = await invoke('speaker_options');
+	if (document.activeElement !== $('speakers-select')) {
+		renderSpeakers();
+	}
+	if (!config.speakers_prompted && speakerOptions.outputs.length && !$('speakers-dialog').open) {
+		promptForSpeakers();
+	}
+}
+
 async function renderSetup() {
 	let sys = await invoke('system_status'),
 		el = $('setup'),
@@ -457,6 +524,22 @@ function bindControls() {
 	bindToggle('cfg-audio', 'audio_switching');
 	bindToggle('cfg-battery', 'publish_battery');
 	bindToggle('cfg-alerts', 'low_battery_alerts');
+	$('speakers-select').onchange = () => {
+		let {value} = $('speakers-select');
+		if (value !== 'saved') {
+			setSpeakers(value === 'auto' ? null : speakerOptions.outputs[Number(value)]);
+		}
+	};
+	$('speakers-dialog').addEventListener('cancel', ev => ev.preventDefault());
+	$('speakers-confirm').onclick = () => {
+		let picked = document.querySelector('input[name="speaker-choice"]:checked');
+		$('speakers-dialog').close();
+		setSpeakers(picked ? speakerOptions.outputs[Number(picked.value)] : null);
+	};
+	$('speakers-auto').onclick = () => {
+		$('speakers-dialog').close();
+		setSpeakers(null);
+	};
 	$('bt-add').onclick = () => {
 		let device = pairedDevices.find(d => d.address === $('bt-add-select').value);
 		if (device) {
@@ -482,22 +565,30 @@ function bindControls() {
 	bindControls();
 	renderSetup();
 	refreshBluetooth();
+	refreshSpeakers();
 	state = await invoke('get_state');
 	renderState();
 	await listen('state', ev => {
 		let wasReachable = headsetReachable(),
-			wasConnected = state.bluetooth_connected;
+			wasConnected = state.bluetooth_connected,
+			wasSink = state.audio_sink;
 		state = ev.payload;
 		if (state.bluetooth_connected !== wasConnected) {
 			refreshBluetooth();
 		}
+		if (state.audio_sink !== wasSink) {
+			refreshSpeakers();
+		}
 		if (!wasReachable && headsetReachable()) {
 			settings = null;
+			settingsFailures = 0;
+			settingsRetryAt = 0;
 		}
 		renderState();
 	});
 	window.addEventListener('focus', () => {
 		renderSetup();
 		refreshBluetooth();
+		refreshSpeakers();
 	});
 })();

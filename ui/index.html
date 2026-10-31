@@ -109,7 +109,7 @@
 			<h2>This computer</h2>
 			<div class="toggles">
 				<label class="toggle"><input type="checkbox" id="cfg-audio"><span>Switch audio output automatically</span>
-					<small>A50 when it's on and off the dock, otherwise the first connected Bluetooth headset below, otherwise speakers.</small></label>
+					<small>A50 when it's on and off the dock, otherwise the first connected Bluetooth headset below, otherwise your speakers.</small></label>
 				<label class="toggle"><input type="checkbox" id="cfg-battery"><span>Show battery in the system battery menu</span>
 					<small id="battery-pub-hint"></small></label>
 				<label class="toggle"><input type="checkbox" id="cfg-alerts"><span>Low battery notifications</span>
@@ -117,6 +117,8 @@
 				<label class="toggle"><input type="checkbox" id="autostart"><span>Start at login</span>
 					<small>Runs in the tray; close the window to keep it running.</small></label>
 			</div>
+			<label class="inline speakers">Speakers
+				<select id="speakers-select"></select></label>
 			<h3>Bluetooth headsets</h3>
 			<p class="hint">Audio goes to the highest connected headset in this list. Pair new ones in your system's Bluetooth settings.</p>
 			<ol class="bt-list" id="bt-list"></ol>
@@ -127,6 +129,16 @@
 			<div class="setup" id="setup"></div>
 		</section>
 	</main>
+
+	<dialog class="dialog" id="speakers-dialog" aria-labelledby="speakers-title">
+		<h2 id="speakers-title">Choose your speakers</h2>
+		<p class="hint">Audio falls back to this output when the headset and your Bluetooth devices aren't in use. You can change it later under This computer.</p>
+		<div class="speaker-choices" id="speaker-choices"></div>
+		<div class="dialog-actions">
+			<button class="bt-button" id="speakers-auto" type="button">Decide automatically</button>
+			<button class="primary" id="speakers-confirm" type="button">Use this output</button>
+		</div>
+	</dialog>
 
 	<div class="toast" id="toast" role="status" hidden></div>
 	<script src="app.js"></script>

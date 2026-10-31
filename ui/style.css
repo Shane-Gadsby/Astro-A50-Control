@@ -287,6 +287,32 @@ button.primary:disabled { opacity: .5; cursor: default; }
 }
 .bt-button:disabled { opacity: .4; cursor: default; }
 .bt-add { margin-bottom: 0; }
+label.speakers { display: flex; flex-wrap: wrap; margin-bottom: 4px; }
+label.speakers select { flex: 1 1 200px; max-width: 100%; }
+
+.dialog {
+	width: min(460px, calc(100% - 32px));
+	background: var(--card);
+	color: var(--text);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	padding: 18px;
+}
+.dialog::backdrop { background: rgb(0 0 0 / .5); }
+.dialog .hint { margin: 0 0 12px; }
+.speaker-choices { display: grid; gap: 6px; margin-bottom: 14px; }
+.speaker-choice {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr);
+	gap: 10px;
+	align-items: start;
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	cursor: pointer;
+}
+.speaker-choice input { margin: 2px 0 0; accent-color: var(--accent); }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .setup { margin-top: 16px; display: grid; gap: 8px; }
 .setup .line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }

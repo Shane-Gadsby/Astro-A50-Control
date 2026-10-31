@@ -22,6 +22,18 @@ impl BluetoothDevice {
 	}
 }
 
+/// The output the user chose as their speakers. Identified by device and
+/// profile family, because the sink name changes with the profile.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SpeakerChoice {
+	pub vendor_id: String,
+	pub product_id: String,
+	pub profile: String,
+	pub sink_name: String,
+	pub label: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -33,6 +45,10 @@ pub struct Config {
 	pub low_battery_alerts: bool,
 	/// Headsets to switch to when connected, highest priority first.
 	pub bluetooth_devices: Vec<BluetoothDevice>,
+	/// Fallback output (None to detect it automatically).
+	pub speakers: Option<SpeakerChoice>,
+	/// The first-start speaker question has been answered.
+	pub speakers_prompted: bool,
 }
 
 impl Default for Config {
@@ -42,6 +58,8 @@ impl Default for Config {
 			publish_battery: true,
 			low_battery_alerts: true,
 			bluetooth_devices: Vec::new(),
+			speakers: None,
+			speakers_prompted: false,
 		}
 	}
 }

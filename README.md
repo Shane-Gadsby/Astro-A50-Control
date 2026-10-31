@@ -18,9 +18,10 @@ Not affiliated with or endorsed by Astro Gaming or Logitech.
   low-battery notifications at 15% and 5%.
 - **Audio switching** — default sink goes to the A50 when it's switched on and off the
   dock, otherwise to the first connected headset in your Bluetooth priority list,
-  otherwise to the speakers. Pick from your paired devices, reorder them, and give them
-  nicknames. Sinks are matched by stable device properties, so PipeWire renames don't
-  break it. See [Known limitations](#known-limitations) before relying on this.
+  otherwise to your speakers. Pick from your paired devices, reorder them, and give them
+  nicknames. The speakers are detected automatically, and you can pick them yourself at
+  first start or later. Sinks are matched by stable device properties, so PipeWire
+  renames don't break it.
 - **Headset settings** — auto power-off (10–30 min), 3 EQ presets (5-band gain,
   frequency, Q, names), mic level, sidetone, noise gate, mic EQ, stream port mix,
   default game/chat balance, alert volume. Changes apply live and are saved to the
@@ -31,10 +32,6 @@ Not affiliated with or endorsed by Astro Gaming or Logitech.
 
 - **Tested on one setup:** Zorin OS 18.1 with GNOME and PipeWire. The base station is
   matched as USB `9886:002c`, so other Astro generations won't work.
-- **The speaker fallback is hard-coded** to AMD onboard audio (`0x1022:0x15e3`, analog
-  profiles). On other hardware no speaker sink is found, so audio stays on whichever
-  output it was using. Edit `matches()` in `src-tauri/src/audio.rs` to suit your machine,
-  or turn off **Switch audio output automatically**.
 - **Looking down while sitting still turns the headset off** in about 15 seconds. This is
   hard-coded in the headset firmware and the app can't change it. See
   [docs/firmware-notes.md](docs/firmware-notes.md).
@@ -47,9 +44,11 @@ There are no prebuilt releases, so start by [building the AppImage](#build).
 2. Run it and use **This computer → Set up system permissions…** (or install
    `packaging/70-a50-control.rules` into `/etc/udev/rules.d/` yourself). Your user must
    be in the `plugdev` group.
-3. Optionally add paired headsets under **This computer → Bluetooth headsets**, highest
+3. Choose your speakers when asked. This is where audio goes when nothing else is in
+   use, and you can change it later under **This computer**.
+4. Optionally add paired headsets under **This computer → Bluetooth headsets**, highest
    priority first. Nicknames only apply in this app.
-4. Tick **Start at login**. If you later move the AppImage, just run it once from the
+5. Tick **Start at login**. If you later move the AppImage, just run it once from the
    new location and the login entry updates itself.
 
 Audio switching needs `pactl` (`pulseaudio-utils` on Debian and Ubuntu), the Bluetooth
