@@ -37,7 +37,8 @@ Not affiliated with or endorsed by Astro Gaming or Logitech.
   matched as USB `9886:002c`, so other Astro generations won't work.
 - **Looking down while sitting still turns the headset off** in about 15 seconds. This is
   hard-coded in the headset firmware and the app can't change it. See
-  [docs/firmware-notes.md](docs/firmware-notes.md).
+  [the research write-up](docs/firmware-notes.md) for how it works and why patching it
+  wasn't pursued.
 
 ## Install
 
