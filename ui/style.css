@@ -312,6 +312,17 @@ label.speakers select { flex: 1 1 200px; max-width: 100%; }
 	cursor: pointer;
 }
 .speaker-choice input { margin: 2px 0 0; accent-color: var(--accent); }
+.update-row { margin: 10px 0 0; }
+.update-notes {
+	max-height: 180px;
+	overflow: auto;
+	margin: 0 0 14px;
+	padding: 8px 10px;
+	background: var(--bg);
+	border-radius: 8px;
+	font: inherit;
+	white-space: pre-wrap;
+}
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .setup { margin-top: 16px; display: grid; gap: 8px; }

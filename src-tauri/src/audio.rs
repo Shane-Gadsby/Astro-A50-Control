@@ -13,6 +13,7 @@ use crate::config::{BluetoothDevice, SpeakerChoice};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -241,7 +242,17 @@ pub fn switch_to(sink: &str) -> Result<(), String> {
 /// moves) are ignored. Restarts itself if pactl exits.
 pub fn spawn_watcher(notify: Sender<()>) {
 	std::thread::spawn(move || loop {
-		let child = Command::new("pactl").arg("subscribe").stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+		let mut command = Command::new("pactl");
+		command.arg("subscribe").stdout(Stdio::piped()).stderr(Stdio::null());
+		// SAFETY: prctl is safe to call between fork and exec. Without this the child
+		// outlives us, which would keep an old AppImage mounted after each update.
+		unsafe {
+			command.pre_exec(|| {
+				libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+				Ok(())
+			});
+		}
+		let child = command.spawn();
 		if let Ok(mut child) = child {
 			if let Some(out) = child.stdout.take() {
 				for line in BufReader::new(out).lines().map_while(Result::ok) {

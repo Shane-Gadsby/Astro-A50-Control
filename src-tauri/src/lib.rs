@@ -7,7 +7,7 @@ mod uhid;
 
 use config::Config;
 use protocol::EqBand;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use service::{CallFn, Msg, State};
 use std::sync::mpsc::{self, Sender};
@@ -17,6 +17,7 @@ use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::image::Image;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const RULES: &str = include_str!("../../packaging/70-a50-control.rules");
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
@@ -135,6 +136,49 @@ async fn speaker_options(ctx: tauri::State<'_, Ctx>) -> Result<audio::SpeakerOpt
 	Ok(audio::speaker_options(choice.as_ref()))
 }
 
+#[derive(Serialize)]
+struct UpdateInfo {
+	version: String,
+	current_version: String,
+	notes: Option<String>,
+}
+
+async fn find_update(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Update>, String> {
+	// Only an AppImage can replace itself.
+	if std::env::var_os("APPIMAGE").is_none() {
+		return Err("Updates only work when running the AppImage".to_string());
+	}
+	app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+	Ok(find_update(&app).await?.map(|update| UpdateInfo {
+		version: update.version,
+		current_version: update.current_version,
+		notes: update.body,
+	}))
+}
+
+/// Tells someone with the app in the tray that a question is waiting in the window.
+#[tauri::command]
+fn notify_update(app: AppHandle, version: String) {
+	let hidden = app.get_webview_window("main").and_then(|w| w.is_visible().ok()) != Some(true);
+	if hidden {
+		let body = format!("Version {version} is ready. Open A50 Control to update.");
+		let _ = app.notification().builder().title("A50 Control update").body(body).show();
+	}
+}
+
+/// Downloads the release, checks its signature, replaces the AppImage and restarts.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+	let update = find_update(&app).await?.ok_or("No update is available")?;
+	update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+	log(&format!("updated to {}, restarting", update.version));
+	app.restart()
+}
+
 #[tauri::command]
 fn system_status() -> service::SystemStatus {
 	service::system_status()
@@ -224,6 +268,7 @@ pub fn run() {
 	tauri::Builder::default()
 		.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
 		.plugin(tauri_plugin_notification::init())
+		.plugin(tauri_plugin_updater::Builder::new().build())
 		.invoke_handler(tauri::generate_handler![
 			get_state,
 			get_config,
@@ -232,6 +277,9 @@ pub fn run() {
 			apply,
 			paired_bluetooth_devices,
 			speaker_options,
+			check_for_update,
+			notify_update,
+			install_update,
 			system_status,
 			set_autostart,
 			install_rules

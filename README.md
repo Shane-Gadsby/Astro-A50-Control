@@ -26,6 +26,9 @@ Not affiliated with or endorsed by Astro Gaming or Logitech.
   frequency, Q, names), mic level, sidetone, noise gate, mic EQ, stream port mix,
   default game/chat balance, alert volume. Changes apply live and are saved to the
   headset's flash a few seconds after the last change.
+- **Updates** — looks for new GitHub releases, asks before installing one, then replaces
+  the AppImage and restarts. Downloads are checked against a signature built into the
+  app. Turn off **Check for updates** to stop it contacting GitHub.
 - Runs in the tray; closing the window keeps it running. Optional start at login.
 
 ## Known limitations
@@ -38,9 +41,11 @@ Not affiliated with or endorsed by Astro Gaming or Logitech.
 
 ## Install
 
-There are no prebuilt releases, so start by [building the AppImage](#build).
+Download the AppImage from [Releases](https://github.com/Shane-Gadsby/Astro-A50-Control/releases)
+if there is one, or [build it](#build).
 
-1. Make `A50 Control_<version>_amd64.AppImage` executable and put it somewhere permanent.
+1. Make the AppImage executable and put it somewhere permanent that your user can write
+   to, so it can update itself.
 2. Run it and use **This computer → Set up system permissions…** (or install
    `packaging/70-a50-control.rules` into `/etc/udev/rules.d/` yourself). Your user must
    be in the `plugdev` group.
@@ -125,6 +130,23 @@ Libs: -L${libdir} -layatana-appindicator3
 PC
 PKG_CONFIG_PATH=/tmp/pc ./build.sh
 ```
+
+## Releasing
+
+Updates only reach apps once a release is published, and they need the signing key.
+
+1. Set the new version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and
+   `package.json`, then commit and push.
+2. Under **Actions → Draft release → Run workflow**, run it on the branch to release. It
+   builds and signs the AppImage and creates a draft release. Running it again refreshes
+   the same draft.
+3. Check the draft, then publish it. Apps find it at their next check.
+
+The workflow needs the updater's private key in the `TAURI_SIGNING_PRIVATE_KEY` repository
+secret. The matching public key is in `src-tauri/tauri.conf.json`. Builds from `build.sh`
+don't need the key: they just skip the updater's signature files. If the private key is
+lost, installed apps can't accept any further updates, and users have to download a new
+AppImage by hand.
 
 ## How it works
 

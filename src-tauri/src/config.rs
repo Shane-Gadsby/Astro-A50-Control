@@ -43,6 +43,8 @@ pub struct Config {
 	pub publish_battery: bool,
 	/// Desktop notification at 15% and 5% while discharging.
 	pub low_battery_alerts: bool,
+	/// Look for new GitHub releases.
+	pub check_updates: bool,
 	/// Headsets to switch to when connected, highest priority first.
 	pub bluetooth_devices: Vec<BluetoothDevice>,
 	/// Fallback output (None to detect it automatically).
@@ -57,6 +59,7 @@ impl Default for Config {
 			audio_switching: true,
 			publish_battery: true,
 			low_battery_alerts: true,
+			check_updates: true,
 			bluetooth_devices: Vec::new(),
 			speakers: None,
 			speakers_prompted: false,

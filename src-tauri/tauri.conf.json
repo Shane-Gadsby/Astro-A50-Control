@@ -23,6 +23,12 @@
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc5MTY1RUZFQTVGRDEzMzkKUldRNUUvMmwvbDRXZVNuU3ZmeDRPWGY3dEtBbysxOU9ubjhtTU5INDlqTTRocW1hOXhpTTRhMGoK",
+      "endpoints": ["https://github.com/Shane-Gadsby/Astro-A50-Control/releases/latest/download/latest.json"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["appimage"],

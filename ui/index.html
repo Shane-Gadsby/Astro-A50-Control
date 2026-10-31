@@ -116,6 +116,11 @@
 					<small>At 15% and 5% while not charging.</small></label>
 				<label class="toggle"><input type="checkbox" id="autostart"><span>Start at login</span>
 					<small>Runs in the tray; close the window to keep it running.</small></label>
+				<label class="toggle"><input type="checkbox" id="cfg-updates"><span>Check for updates</span>
+					<small>Asks GitHub for the latest release at startup and every few hours. Nothing installs without your OK.</small></label>
+			</div>
+			<div class="row update-row">
+				<button class="bt-button" id="update-check" type="button">Check now</button>
 			</div>
 			<label class="inline speakers">Speakers
 				<select id="speakers-select"></select></label>
@@ -137,6 +142,16 @@
 		<div class="dialog-actions">
 			<button class="bt-button" id="speakers-auto" type="button">Decide automatically</button>
 			<button class="primary" id="speakers-confirm" type="button">Use this output</button>
+		</div>
+	</dialog>
+
+	<dialog class="dialog" id="update-dialog" aria-labelledby="update-title">
+		<h2 id="update-title">Update available</h2>
+		<p class="hint" id="update-text"></p>
+		<pre class="update-notes" id="update-notes" hidden></pre>
+		<div class="dialog-actions">
+			<button class="bt-button" id="update-later" type="button">Not now</button>
+			<button class="primary" id="update-install" type="button">Update and restart</button>
 		</div>
 	</dialog>
 

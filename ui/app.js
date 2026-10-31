@@ -6,6 +6,7 @@ let {invoke} = window.__TAURI__.core,
 	SHUTOFF_CHOICES = [10, 15, 20, 25, 30],
 	SETTINGS_RETRY_MS = 2000,
 	SETTINGS_RETRY_MAX_MS = 30000,
+	UPDATE_CHECK_MS = 6 * 60 * 60 * 1000,
 	BAND_LABELS = ['Low shelf', 'Low mid', 'Mid', 'High mid', 'High shelf'],
 	state = null,
 	settings = null,
@@ -14,6 +15,9 @@ let {invoke} = window.__TAURI__.core,
 	speakerOptions = {outputs: [], detected: null, selected: null},
 	settingsFailures = 0,
 	settingsRetryAt = 0,
+	pendingUpdate = null,
+	notifiedUpdate = null,
+	dismissedUpdate = null,
 	selectedPreset = 1,
 	loadingSettings = false,
 	toastTimer;
@@ -383,6 +387,7 @@ async function setSpeakers(choice) {
 	config.speakers_prompted = true;
 	await saveConfig();
 	await refreshSpeakers();
+	promptForUpdate();
 }
 
 function renderSpeakers() {
@@ -429,6 +434,48 @@ async function refreshSpeakers() {
 	if (!config.speakers_prompted && speakerOptions.outputs.length && !$('speakers-dialog').open) {
 		promptForSpeakers();
 	}
+}
+
+function promptForUpdate() {
+	let dialog = $('update-dialog'),
+		update = pendingUpdate;
+	if (!update || update.version === dismissedUpdate || dialog.open || $('speakers-dialog').open) {
+		return;
+	}
+	$('update-text').textContent = `A50 Control ${update.version} is available. You have ${update.current_version}. Download it and restart now?`;
+	$('update-notes').textContent = update.notes || '';
+	$('update-notes').hidden = !update.notes;
+	$('update-install').textContent = 'Update and restart';
+	$('update-install').disabled = false;
+	$('update-later').disabled = false;
+	dialog.showModal();
+	if (notifiedUpdate !== update.version) {
+		notifiedUpdate = update.version;
+		invoke('notify_update', {version: update.version});
+	}
+}
+
+async function checkForUpdate(manual) {
+	if (!manual && !config.check_updates) {
+		return;
+	}
+	try {
+		pendingUpdate = await invoke('check_for_update');
+	}
+	catch (err) {
+		// A background check failing (offline, say) isn't worth interrupting for.
+		if (manual) {
+			toast(`Couldn't check for updates: ${err}`, true);
+		}
+		return;
+	}
+	if (manual) {
+		dismissedUpdate = null;
+		if (!pendingUpdate) {
+			toast('A50 Control is up to date');
+		}
+	}
+	promptForUpdate();
 }
 
 async function renderSetup() {
@@ -524,6 +571,33 @@ function bindControls() {
 	bindToggle('cfg-audio', 'audio_switching');
 	bindToggle('cfg-battery', 'publish_battery');
 	bindToggle('cfg-alerts', 'low_battery_alerts');
+	bindToggle('cfg-updates', 'check_updates');
+	$('update-check').onclick = () => checkForUpdate(true);
+	$('update-dialog').addEventListener('cancel', ev => {
+		if ($('update-later').disabled) {
+			ev.preventDefault();
+		}
+		else {
+			dismissedUpdate = pendingUpdate && pendingUpdate.version;
+		}
+	});
+	$('update-later').onclick = () => {
+		dismissedUpdate = pendingUpdate.version;
+		$('update-dialog').close();
+	};
+	$('update-install').onclick = async () => {
+		$('update-install').disabled = true;
+		$('update-later').disabled = true;
+		$('update-install').textContent = 'Downloading…';
+		try {
+			await invoke('install_update');
+		}
+		catch (err) {
+			$('update-dialog').close();
+			dismissedUpdate = pendingUpdate.version;
+			toast(`Update failed: ${err}`, true);
+		}
+	};
 	$('speakers-select').onchange = () => {
 		let {value} = $('speakers-select');
 		if (value !== 'saved') {
@@ -590,5 +664,8 @@ function bindControls() {
 		renderSetup();
 		refreshBluetooth();
 		refreshSpeakers();
+		promptForUpdate();
 	});
+	checkForUpdate(false);
+	setInterval(() => checkForUpdate(false), UPDATE_CHECK_MS);
 })();
