@@ -61,21 +61,59 @@ access): hidraw delivers every reply to every open handle.
 ## Build
 
 ```sh
-npm install
+git clone https://github.com/Shane-Gadsby/Astro-A50-Control.git
+cd Astro-A50-Control
+./build.sh
+```
+
+`build.sh` checks each prerequisite below and asks before installing anything that's
+missing, showing the exact command first. Saying no to any of them stops the script, and
+so does running it with no one to answer. When it finishes it prints the AppImage's path,
+under `src-tauri/target/release/bundle/appimage/`. It doesn't install the app itself, so
+carry on with [Install](#install).
+
+The first build takes several minutes and downloads the Rust crates plus the AppImage
+bundling tools. Later builds are quicker.
+
+Installing system packages uses `sudo` with `apt-get`, `dnf` or `pacman`. Only the
+`apt-get` path has been tried; the `dnf` and `pacman` package names are untested. On any
+other distro, install the prerequisites yourself and run `./build.sh` again.
+
+### Prerequisites
+
+| Prerequisite | Debian / Ubuntu | Fedora | Arch |
+|---|---|---|---|
+| C compiler and build tools | `build-essential` | `gcc gcc-c++ make` | `base-devel` |
+| pkg-config | `pkg-config` | `pkgconf-pkg-config` | `pkgconf` |
+| file | `file` | `file` | `file` |
+| GTK 3 development files | `libgtk-3-dev` | `gtk3-devel` | `gtk3` |
+| WebKitGTK 4.1 development files | `libwebkit2gtk-4.1-dev` | `webkit2gtk4.1-devel` | `webkit2gtk-4.1` |
+| D-Bus development files | `libdbus-1-dev` | `dbus-devel` | `dbus` |
+| AppIndicator development files | `libayatana-appindicator3-dev` | `libayatana-appindicator-gtk3-devel` | `libayatana-appindicator` |
+| Node.js and npm | `nodejs npm` | `nodejs npm` | `nodejs npm` |
+
+Rust is installed with [rustup](https://rustup.rs) into your home folder, because distro
+packages are often too old. `curl` is only needed for that step. The Tauri build tool is
+an npm package that goes in this folder's `node_modules`.
+
+### Building by hand
+
+With the prerequisites in place:
+
+```sh
+npm ci
 npm run build        # → src-tauri/target/release/bundle/appimage/
 npm run dev          # development run
 ```
 
-Needs Rust, Node, the WebKitGTK 4.1 development package (`libwebkit2gtk-4.1-dev`) and,
-for the AppImage's tray icon, the Ayatana AppIndicator development package:
+On Debian and Ubuntu, `npm run build` needs `TAURI_LINUX_AYATANA_APPINDICATOR=true` set
+when only the Ayatana library is installed. `build.sh` sets this for you.
 
-```sh
-sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
-```
+### Without the AppIndicator development package
 
 The bundler only uses `pkg-config` to locate the AppIndicator library. Without the dev
 package it aborts with "Can't detect any appindicator library". If installing it isn't an
-option, a `.pc` file pointing at the runtime library works too:
+option, a `.pc` file pointing at the runtime library works too, and `build.sh` accepts it:
 
 ```sh
 mkdir -p /tmp/pc && cat > /tmp/pc/ayatana-appindicator3-0.1.pc <<'PC'
@@ -85,7 +123,7 @@ Description: runtime-only shim for the Tauri bundler
 Version: 0.5.93
 Libs: -L${libdir} -layatana-appindicator3
 PC
-PKG_CONFIG_PATH=/tmp/pc TAURI_LINUX_AYATANA_APPINDICATOR=true npm run build
+PKG_CONFIG_PATH=/tmp/pc ./build.sh
 ```
 
 ## How it works
