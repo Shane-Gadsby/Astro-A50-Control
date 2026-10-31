@@ -2,6 +2,8 @@
 name = "a50-control"
 version = "0.1.0"
 description = "Astro A50 Gen 4 settings, battery and audio switching for Linux"
+license = "MIT"
+repository = "https://github.com/Shane-Gadsby/Astro-A50-Control"
 edition = "2021"
 
 [lib]

@@ -1,15 +1,19 @@
 {
   "name": "a50-control",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.1.0",
+  "description": "Astro A50 Gen 4 settings, battery and audio switching for Linux",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shane-Gadsby/Astro-A50-Control.git"
+  },
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Shane Gadsby",
+  "license": "MIT",
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.4"
   },

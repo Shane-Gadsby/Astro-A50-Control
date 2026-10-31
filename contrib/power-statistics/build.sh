@@ -3,12 +3,18 @@
 # the device list shows a peripheral's model name ("Astro A50 Headset") instead of
 # only its kind, and capitalises kinds the app has no translation for.
 #
-# Installs the binary to /path/to/gnome-power-statistics
-# and a user launcher overriding the system one. The system package is left alone.
-# No sudo: the upower-glib headers are unpacked from the .deb into the build dir.
+# Usage: DEST=/absolute/install/dir ./build.sh
+#
+# Installs the binary to $DEST and a user launcher overriding the system one. The
+# system package is left alone. No sudo: the upower-glib headers are unpacked from
+# the .deb into the build dir.
 set -eu
 
-DEST=${DEST:-/path/to/gnome-power-statistics}
+DEST=${DEST:?set DEST to the absolute directory to install gnome-power-statistics into}
+case $DEST in
+	/*) ;;
+	*) echo "DEST must be an absolute path" >&2; exit 1 ;;
+esac
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
