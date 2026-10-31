@@ -9,7 +9,7 @@
 //! it is switched on and off the dock, and a new state must hold for STABLE
 //! before it counts (lifting a switched-off headset reports "on" for ~2 s).
 
-use crate::audio::{self, Target};
+use crate::audio;
 use crate::config::Config;
 use crate::device::{self, DevError, Hid};
 use crate::protocol::{self, Battery, Status};
@@ -48,9 +48,11 @@ pub struct State {
 	pub wearing: bool,
 	pub battery: Option<Battery>,
 	pub battery_published: bool,
-	pub audio_target: Option<Target>,
+	/// Label of the output audio should be on.
+	pub audio_target: Option<String>,
 	pub audio_sink: Option<String>,
-	pub sony_connected: bool,
+	/// Label of the highest-priority connected Bluetooth headset.
+	pub bluetooth_connected: Option<String>,
 }
 
 pub struct Hooks {
@@ -324,29 +326,31 @@ impl Service {
 
 	fn apply_audio(&mut self) {
 		let cfg = self.cfg();
-		self.st.sony_connected = audio::resolve(Target::Sony, &cfg.sony_address).is_some();
+		let sinks = audio::list_sinks();
+		let bluetooth = audio::first_connected(&cfg.bluetooth_devices, &sinks);
+		self.st.bluetooth_connected = bluetooth.as_ref().map(|(device, _)| device.label().to_string());
 		if !cfg.audio_switching || !self.baselined {
 			return;
 		}
-		let target = if self.st.wearing {
-			Target::A50
+		let (label, sink) = if self.st.wearing {
+			("Astro A50", audio::find_a50(&sinks))
 		}
-		else if self.st.sony_connected {
-			Target::Sony
+		else if let Some((device, sink)) = bluetooth {
+			(device.label(), Some(sink))
 		}
 		else {
-			Target::Speakers
+			("Speakers", audio::find_speakers(&sinks))
 		};
-		self.st.audio_target = Some(target);
-		let Some(sink) = audio::resolve(target, &cfg.sony_address) else {
+		self.st.audio_target = Some(label.to_string());
+		let Some(sink) = sink else {
 			if self.st.audio_sink.is_some() {
-				crate::log(&format!("no sink found for {} — waiting for it to appear", target.label()));
+				crate::log(&format!("no sink found for {label} — waiting for it to appear"));
 			}
 			self.st.audio_sink = None;
 			return;
 		};
 		if audio::default_sink().as_deref() != Some(sink.as_str()) {
-			crate::log(&format!("switching to {} → {sink}", target.label()));
+			crate::log(&format!("switching to {label} → {sink}"));
 			if let Err(e) = audio::switch_to(&sink) {
 				crate::log(&format!("WARNING: failed to switch to {sink}: {e}"));
 			}

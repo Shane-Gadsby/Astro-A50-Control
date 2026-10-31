@@ -1,38 +1,21 @@
 //! Default-sink switching, ported from the a50-watcher Node daemon.
 //!
-//! Priority: A50 (on and off the dock) > Sony WH-CH720N (connected) > speakers.
-//! Sinks are identified by stable device properties from `pactl -f json`
-//! (USB vendor/product, Bluetooth address, card profile), never by node name:
-//! PipeWire rewrites names whenever a device is re-created (e.g.
+//! Priority: A50 (on and off the dock) > connected Bluetooth headsets, in the
+//! user's order > speakers. Sinks are identified by stable device properties from
+//! `pactl -f json` (USB vendor/product, Bluetooth address, card profile), never by
+//! node name: PipeWire rewrites names whenever a device is re-created (e.g.
 //! `...A50-00.stereo-chat` → `...A50-00.stereo-chat.2`).
 //!
 //! Decisions compare against PipeWire's *actual* default sink, so if a sink is
 //! re-created and WirePlumber moves the default, the next sink event puts it back.
 
+use crate::config::BluetoothDevice;
 use serde::Serialize;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
-
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Target {
-	A50,
-	Sony,
-	Speakers,
-}
-
-impl Target {
-	pub fn label(self) -> &'static str {
-		match self {
-			Target::A50 => "Astro A50",
-			Target::Sony => "Sony WH-CH720N",
-			Target::Speakers => "Speakers",
-		}
-	}
-}
 
 pub struct Sink {
 	pub name: String,
@@ -45,27 +28,93 @@ impl Sink {
 	}
 }
 
-fn matches(target: Target, sink: &Sink, sony_address: &str) -> bool {
-	match target {
-		// Chat profile only; the base also exposes a stereo-game sink.
-		Target::A50 => {
-			sink.prop("device.vendor.id") == "0x9886"
-				&& sink.prop("device.product.id") == "0x002c"
-				&& sink.prop("device.profile.name").contains("chat")
+/// Chat profile only; the base also exposes a stereo-game sink.
+fn is_a50(sink: &Sink) -> bool {
+	sink.prop("device.vendor.id") == "0x9886"
+		&& sink.prop("device.product.id") == "0x002c"
+		&& sink.prop("device.profile.name").contains("chat")
+}
+
+/// Onboard Family 17h/19h HD Audio, analog (line-out) profiles only.
+fn is_speakers(sink: &Sink) -> bool {
+	sink.prop("device.vendor.id") == "0x1022"
+		&& sink.prop("device.product.id") == "0x15e3"
+		&& sink.prop("device.profile.name").starts_with("analog-")
+}
+
+fn is_bluetooth(sink: &Sink, address: &str) -> bool {
+	!address.is_empty()
+		&& (sink.prop("api.bluez5.address").eq_ignore_ascii_case(address)
+			|| sink.name.starts_with(&format!("bluez_output.{}.", address.to_ascii_uppercase().replace(':', "_"))))
+}
+
+pub fn find_a50(sinks: &[Sink]) -> Option<String> {
+	sinks.iter().find(|s| is_a50(s)).map(|s| s.name.clone())
+}
+
+pub fn find_speakers(sinks: &[Sink]) -> Option<String> {
+	sinks.iter().find(|s| is_speakers(s)).map(|s| s.name.clone())
+}
+
+/// The highest-priority device in `devices` that currently has a sink.
+pub fn first_connected<'a>(devices: &'a [BluetoothDevice], sinks: &[Sink]) -> Option<(&'a BluetoothDevice, String)> {
+	devices
+		.iter()
+		.find_map(|d| sinks.iter().find(|s| is_bluetooth(s, &d.address)).map(|s| (d, s.name.clone())))
+}
+
+/// A paired audio device, as the system Bluetooth panel lists it.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct PairedDevice {
+	pub address: String,
+	pub name: String,
+	pub connected: bool,
+}
+
+const AUDIO_SINK_UUID: &str = "0000110b-";
+
+/// Paired audio devices from BlueZ. Empty if Bluetooth isn't available.
+pub fn paired_devices() -> Vec<PairedDevice> {
+	let out = Command::new("busctl")
+		.args(["--system", "--json=short", "call", "org.bluez", "/"])
+		.args(["org.freedesktop.DBus.ObjectManager", "GetManagedObjects"])
+		.output();
+	match out {
+		Ok(o) if o.status.success() => {
+			serde_json::from_slice(&o.stdout).map(|v| parse_paired(&v)).unwrap_or_default()
 		}
-		Target::Sony => {
-			let addr = sony_address.to_ascii_uppercase();
-			!addr.is_empty()
-				&& (sink.prop("api.bluez5.address").eq_ignore_ascii_case(&addr)
-					|| sink.name.starts_with(&format!("bluez_output.{}.", addr.replace(':', "_"))))
-		}
-		// Onboard Family 17h/19h HD Audio, analog (line-out) profiles only.
-		Target::Speakers => {
-			sink.prop("device.vendor.id") == "0x1022"
-				&& sink.prop("device.product.id") == "0x15e3"
-				&& sink.prop("device.profile.name").starts_with("analog-")
-		}
+		_ => Vec::new(),
 	}
+}
+
+fn parse_paired(reply: &Value) -> Vec<PairedDevice> {
+	let Some(objects) = reply.pointer("/data/0").and_then(Value::as_object) else {
+		return Vec::new();
+	};
+	let mut found: Vec<PairedDevice> = objects
+		.values()
+		.filter_map(|object| {
+			let dev = object.get("org.bluez.Device1")?;
+			let prop = |key: &str| dev.get(key).and_then(|p| p.get("data"));
+			let text = |key: &str| prop(key).and_then(Value::as_str);
+			let flag = |key: &str| prop(key).and_then(Value::as_bool).unwrap_or(false);
+			// UUIDs can be missing until first connection, so the icon counts too.
+			let has_sink = prop("UUIDs")
+				.and_then(Value::as_array)
+				.is_some_and(|ids| ids.iter().filter_map(Value::as_str).any(|id| id.starts_with(AUDIO_SINK_UUID)));
+			if !flag("Paired") || !(has_sink || text("Icon").is_some_and(|i| i.starts_with("audio-"))) {
+				return None;
+			}
+			let address = text("Address")?.to_string();
+			Some(PairedDevice {
+				name: text("Alias").unwrap_or(&address).to_string(),
+				connected: flag("Connected"),
+				address,
+			})
+		})
+		.collect();
+	found.sort_by_key(|d| d.name.to_lowercase());
+	found
 }
 
 pub fn list_sinks() -> Vec<Sink> {
@@ -86,10 +135,6 @@ pub fn list_sinks() -> Vec<Sink> {
 			Some(Sink { name, props })
 		})
 		.collect()
-}
-
-pub fn resolve(target: Target, sony_address: &str) -> Option<String> {
-	list_sinks().into_iter().find(|s| matches(target, s, sony_address)).map(|s| s.name)
 }
 
 pub fn default_sink() -> Option<String> {
@@ -139,4 +184,87 @@ pub fn spawn_watcher(notify: Sender<()>) {
 		crate::log("pactl subscribe exited — restarting in 2s");
 		std::thread::sleep(Duration::from_secs(2));
 	});
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use serde_json::json;
+
+	fn device(address: &str, nickname: &str) -> BluetoothDevice {
+		BluetoothDevice { address: address.into(), name: "Headset".into(), nickname: nickname.into() }
+	}
+
+	fn bt_sink(address: &str) -> Sink {
+		Sink { name: format!("bluez_output.{}.1", address.replace(':', "_")), props: json!({ "api.bluez5.address": address }) }
+	}
+
+	const FIRST: &str = "AA:AA:AA:AA:AA:01";
+	const SECOND: &str = "AA:AA:AA:AA:AA:02";
+
+	#[test]
+	fn list_order_decides_not_sink_order() {
+		let devices = [device(FIRST, ""), device(SECOND, "")];
+		let sinks = [bt_sink(SECOND), bt_sink(FIRST)];
+		assert_eq!(first_connected(&devices, &sinks).unwrap().0.address, FIRST);
+	}
+
+	#[test]
+	fn falls_through_to_next_connected_device() {
+		let devices = [device(FIRST, ""), device(SECOND, "")];
+		let (found, sink) = first_connected(&devices, &[bt_sink(SECOND)]).unwrap();
+		assert_eq!(found.address, SECOND);
+		assert_eq!(sink, "bluez_output.AA_AA_AA_AA_AA_02.1");
+	}
+
+	#[test]
+	fn unlisted_and_blank_addresses_never_match() {
+		// A sink with no Bluetooth address must not match a blank config entry.
+		let usb = Sink { name: "alsa_output.usb".into(), props: json!({}) };
+		assert!(first_connected(&[device("", "")], &[usb]).is_none());
+		assert!(first_connected(&[device(FIRST, "")], &[bt_sink(SECOND)]).is_none());
+	}
+
+	#[test]
+	fn matches_lowercase_address_by_sink_name() {
+		let sink = Sink { name: "bluez_output.AA_AA_AA_AA_AA_01.1".into(), props: json!({}) };
+		assert!(is_bluetooth(&sink, "aa:aa:aa:aa:aa:01"));
+	}
+
+	#[test]
+	fn nickname_overrides_name_and_blank_falls_back() {
+		assert_eq!(device(FIRST, "Gym buds").label(), "Gym buds");
+		assert_eq!(device(FIRST, "").label(), "Headset");
+		let unnamed = BluetoothDevice { address: FIRST.into(), ..Default::default() };
+		assert_eq!(unnamed.label(), FIRST);
+	}
+
+	#[test]
+	fn keeps_only_paired_audio_devices() {
+		let dev = |alias: &str, paired: bool, icon: &str, uuids: Value| {
+			json!({ "org.bluez.Device1": {
+				"Address": { "type": "s", "data": format!("00:00:00:00:00:{alias}") },
+				"Alias": { "type": "s", "data": alias },
+				"Paired": { "type": "b", "data": paired },
+				"Connected": { "type": "b", "data": alias == "AB" },
+				"Icon": { "type": "s", "data": icon },
+				"UUIDs": { "type": "as", "data": uuids },
+			}})
+		};
+		let reply = json!({ "type": "a{oa{sa{sv}}}", "data": [{
+			"/org/bluez": { "org.bluez.AgentManager1": {} },
+			"/org/bluez/hci0/dev_1": dev("BC", true, "audio-headphones", json!([])),
+			"/org/bluez/hci0/dev_2": dev("AB", true, "", json!(["0000110b-0000-1000-8000-00805f9b34fb"])),
+			"/org/bluez/hci0/dev_3": dev("KB", true, "input-keyboard", json!(["00001124-0000-1000-8000-00805f9b34fb"])),
+			"/org/bluez/hci0/dev_4": dev("NP", false, "audio-headset", json!([])),
+		}]});
+		let found = parse_paired(&reply);
+		assert_eq!(found.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["AB", "BC"]);
+		assert!(found[0].connected && !found[1].connected);
+	}
+
+	#[test]
+	fn unexpected_bluez_reply_is_empty() {
+		assert!(parse_paired(&json!({})).is_empty());
+	}
 }

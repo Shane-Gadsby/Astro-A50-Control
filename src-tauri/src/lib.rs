@@ -125,6 +125,11 @@ async fn apply(ctx: tauri::State<'_, Ctx>, change: Change) -> Result<Value, Stri
 }
 
 #[tauri::command]
+async fn paired_bluetooth_devices() -> Vec<audio::PairedDevice> {
+	audio::paired_devices()
+}
+
+#[tauri::command]
 fn system_status() -> service::SystemStatus {
 	service::system_status()
 }
@@ -219,6 +224,7 @@ pub fn run() {
 			set_config,
 			read_settings,
 			apply,
+			paired_bluetooth_devices,
 			system_status,
 			set_autostart,
 			install_rules

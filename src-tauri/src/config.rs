@@ -5,17 +5,34 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// A Bluetooth headset the user chose for audio switching.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct BluetoothDevice {
+	pub address: String,
+	/// Name from the system Bluetooth panel, kept for when it isn't available.
+	pub name: String,
+	/// The user's label for this app only (empty to use `name`).
+	pub nickname: String,
+}
+
+impl BluetoothDevice {
+	pub fn label(&self) -> &str {
+		[&self.nickname, &self.name].into_iter().find(|s| !s.is_empty()).unwrap_or(&self.address)
+	}
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
-	/// Switch the default sink between A50 / Sony / speakers automatically.
+	/// Switch the default sink between A50 / Bluetooth / speakers automatically.
 	pub audio_switching: bool,
 	/// Publish the headset battery to UPower via /dev/uhid.
 	pub publish_battery: bool,
 	/// Desktop notification at 15% and 5% while discharging.
 	pub low_battery_alerts: bool,
-	/// Bluetooth address of the Sony WH-CH720N (empty to ignore it).
-	pub sony_address: String,
+	/// Headsets to switch to when connected, highest priority first.
+	pub bluetooth_devices: Vec<BluetoothDevice>,
 }
 
 impl Default for Config {
@@ -24,7 +41,7 @@ impl Default for Config {
 			audio_switching: true,
 			publish_battery: true,
 			low_battery_alerts: true,
-			sony_address: String::new(),
+			bluetooth_devices: Vec::new(),
 		}
 	}
 }

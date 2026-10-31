@@ -8,6 +8,7 @@ let {invoke} = window.__TAURI__.core,
 	state = null,
 	settings = null,
 	config = null,
+	pairedDevices = [],
 	selectedPreset = 1,
 	loadingSettings = false,
 	toastTimer;
@@ -79,7 +80,7 @@ function renderState() {
 			? (b && b.charging ? 'Docked · charging' : 'Docked')
 			: (s.on ? 'Headset on' : 'Headset off');
 		$('subline').textContent = st.audio_target
-			? `Audio → ${({a50: 'Astro A50', sony: 'Sony WH-CH720N', speakers: 'Speakers'})[st.audio_target]}`
+			? `Audio → ${st.audio_target}`
 			: '';
 	}
 
@@ -89,8 +90,8 @@ function renderState() {
 	if (st.battery_published) {
 		chips.push(['In system battery menu', true]);
 	}
-	if (st.sony_connected) {
-		chips.push(['Sony connected', true]);
+	if (st.bluetooth_connected) {
+		chips.push([`${st.bluetooth_connected} connected`, true]);
 	}
 	$('chips').replaceChildren(...chips.map(([text, on]) => {
 		let el = document.createElement('span');
@@ -272,6 +273,97 @@ async function saveConfig() {
 	}
 }
 
+function bluetoothButton(text, label, disabled, onclick) {
+	let btn = document.createElement('button');
+	btn.className = 'bt-button';
+	btn.type = 'button';
+	btn.textContent = text;
+	btn.setAttribute('aria-label', label);
+	btn.disabled = disabled;
+	btn.onclick = onclick;
+	return btn;
+}
+
+function moveBluetoothDevice(from, to) {
+	let [device] = config.bluetooth_devices.splice(from, 1);
+	config.bluetooth_devices.splice(to, 0, device);
+	saveConfig();
+	renderBluetooth();
+}
+
+function renderBluetooth() {
+	let devices = config.bluetooth_devices,
+		listed = new Set(devices.map(d => d.address)),
+		available = pairedDevices.filter(d => !listed.has(d.address));
+
+	$('bt-list').hidden = !devices.length;
+	$('bt-list').replaceChildren(...devices.map((device, i) => {
+		let row = document.createElement('li'),
+			info = document.createElement('div'),
+			name = document.createElement('span'),
+			detail = document.createElement('small'),
+			nickname = document.createElement('input'),
+			paired = pairedDevices.find(d => d.address === device.address),
+			status = !paired ? 'not paired' : (paired.connected ? 'connected' : 'not connected');
+
+		name.textContent = device.name || device.address;
+		detail.textContent = `${device.address} · ${status}`;
+		info.className = 'bt-info';
+		info.append(name, detail);
+
+		nickname.value = device.nickname;
+		nickname.placeholder = 'Nickname';
+		nickname.spellcheck = false;
+		nickname.setAttribute('aria-label', `Nickname for ${device.name}`);
+		nickname.onchange = () => {
+			device.nickname = nickname.value.trim();
+			nickname.value = device.nickname;
+			saveConfig();
+		};
+
+		row.append(
+			info,
+			nickname,
+			bluetoothButton('↑', `Move ${device.name} up`, i === 0, () => moveBluetoothDevice(i, i - 1)),
+			bluetoothButton('↓', `Move ${device.name} down`, i === devices.length - 1, () => moveBluetoothDevice(i, i + 1)),
+			bluetoothButton('Remove', `Remove ${device.name}`, false, () => {
+				devices.splice(i, 1);
+				saveConfig();
+				renderBluetooth();
+			}),
+		);
+		return row;
+	}));
+
+	let select = $('bt-add-select');
+	select.replaceChildren(...available.map(d => new Option(d.name, d.address)));
+	if (!available.length) {
+		select.append(new Option(pairedDevices.length ? 'All paired headsets added' : 'No paired headsets found', ''));
+	}
+	select.disabled = !available.length;
+	$('bt-add').disabled = !available.length;
+}
+
+async function refreshBluetooth() {
+	pairedDevices = await invoke('paired_bluetooth_devices');
+	// Follow renames made in the Bluetooth panel.
+	let renamed = false;
+	for (let device of config.bluetooth_devices) {
+		let paired = pairedDevices.find(d => d.address === device.address);
+		if (paired && paired.name !== device.name) {
+			device.name = paired.name;
+			renamed = true;
+		}
+	}
+	if (renamed) {
+		saveConfig();
+	}
+	// Don't rebuild the list under someone typing a nickname.
+	if (!(document.activeElement && document.activeElement.matches('#bt-list input'))) {
+		renderBluetooth();
+	}
+}
+
 async function renderSetup() {
 	let sys = await invoke('system_status'),
 		el = $('setup'),
@@ -365,10 +457,13 @@ function bindControls() {
 	bindToggle('cfg-audio', 'audio_switching');
 	bindToggle('cfg-battery', 'publish_battery');
 	bindToggle('cfg-alerts', 'low_battery_alerts');
-	$('cfg-sony').value = config.sony_address;
-	$('cfg-sony').onchange = () => {
-		config.sony_address = $('cfg-sony').value.trim().toUpperCase();
-		saveConfig();
+	$('bt-add').onclick = () => {
+		let device = pairedDevices.find(d => d.address === $('bt-add-select').value);
+		if (device) {
+			config.bluetooth_devices.push({address: device.address, name: device.name, nickname: ''});
+			saveConfig();
+			renderBluetooth();
+		}
 	};
 	$('autostart').onchange = async () => {
 		try {
@@ -386,15 +481,23 @@ function bindControls() {
 	config = await invoke('get_config');
 	bindControls();
 	renderSetup();
+	refreshBluetooth();
 	state = await invoke('get_state');
 	renderState();
 	await listen('state', ev => {
-		let wasReachable = headsetReachable();
+		let wasReachable = headsetReachable(),
+			wasConnected = state.bluetooth_connected;
 		state = ev.payload;
+		if (state.bluetooth_connected !== wasConnected) {
+			refreshBluetooth();
+		}
 		if (!wasReachable && headsetReachable()) {
 			settings = null;
 		}
 		renderState();
 	});
-	window.addEventListener('focus', renderSetup);
+	window.addEventListener('focus', () => {
+		renderSetup();
+		refreshBluetooth();
+	});
 })();

@@ -263,6 +263,31 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .toggle input { margin-top: 2px; }
 .toggle small { grid-column: 2; }
 
+.bt-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.bt-list[hidden] { display: none; }
+.bt-list li {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(90px, 160px) auto auto auto;
+	gap: 6px;
+	align-items: center;
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+}
+.bt-info { display: grid; min-width: 0; }
+.bt-info span, .bt-info small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-info span { font-weight: 600; }
+.bt-button {
+	background: transparent;
+	color: var(--text);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 5px 9px;
+	cursor: pointer;
+}
+.bt-button:disabled { opacity: .4; cursor: default; }
+.bt-add { margin-bottom: 0; }
+
 .setup { margin-top: 16px; display: grid; gap: 8px; }
 .setup .line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .ok { color: var(--accent); }
@@ -284,4 +309,6 @@ button.primary:disabled { opacity: .5; cursor: default; }
 @media (max-width: 560px) {
 	.bands { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 	.band { --fader-h: 110px; }
+	.bt-list li { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+	.bt-info { grid-column: 1 / -1; }
 }
