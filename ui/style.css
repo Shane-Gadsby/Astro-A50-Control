@@ -312,6 +312,10 @@ label.speakers select { flex: 1 1 200px; max-width: 100%; }
 	cursor: pointer;
 }
 .speaker-choice input { margin: 2px 0 0; accent-color: var(--accent); }
+.about { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.about h2 { margin: 0; }
+.about-links { display: flex; flex-wrap: wrap; gap: 6px; }
+
 .update-row { margin: 10px 0 0; }
 .update-notes {
 	max-height: 180px;

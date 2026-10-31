@@ -573,6 +573,16 @@ function bindControls() {
 	bindToggle('cfg-alerts', 'low_battery_alerts');
 	bindToggle('cfg-updates', 'check_updates');
 	$('update-check').onclick = () => checkForUpdate(true);
+	let openLink = async link => {
+		try {
+			await invoke('open_link', {link});
+		}
+		catch (err) {
+			toast(`Couldn't open the link: ${err}`, true);
+		}
+	};
+	$('link-repo').onclick = () => openLink('repo');
+	$('link-issues').onclick = () => openLink('issues');
 	$('update-dialog').addEventListener('cancel', ev => {
 		if ($('update-later').disabled) {
 			ev.preventDefault();
@@ -640,6 +650,7 @@ function bindControls() {
 	renderSetup();
 	refreshBluetooth();
 	refreshSpeakers();
+	$('app-version').textContent = `Version ${await invoke('app_version')}`;
 	state = await invoke('get_state');
 	renderState();
 	await listen('state', ev => {

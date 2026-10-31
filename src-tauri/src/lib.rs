@@ -1,6 +1,7 @@
 mod audio;
 mod config;
 mod device;
+mod host;
 mod protocol;
 mod service;
 mod uhid;
@@ -19,6 +20,8 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
+const REPO_URL: &str = "https://github.com/Shane-Gadsby/Astro-A50-Control";
+const ISSUES_URL: &str = "https://github.com/Shane-Gadsby/Astro-A50-Control/issues";
 const RULES: &str = include_str!("../../packaging/70-a50-control.rules");
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
 const TRAY_ICON_CHARGING: &[u8] = include_bytes!("../icons/tray-charging.png");
@@ -176,7 +179,43 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 	let update = find_update(&app).await?.ok_or("No update is available")?;
 	update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
 	log(&format!("updated to {}, restarting", update.version));
-	app.restart()
+	restart_appimage(&app)
+}
+
+/// Like `AppHandle::restart`, but the new process doesn't inherit paths into this
+/// AppImage's mount, which goes away when we exit.
+fn restart_appimage(app: &AppHandle) -> ! {
+	let appimage = std::env::var_os("APPIMAGE").unwrap_or_default();
+	app.cleanup_before_exit();
+	if let Err(e) = host::command(appimage).args(std::env::args_os().skip(1)).spawn() {
+		log(&format!("could not restart: {e}"));
+	}
+	std::process::exit(0)
+}
+
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+	app.package_info().version.to_string()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Link {
+	Repo,
+	Issues,
+}
+
+/// Opens one of the project's pages in the default browser. The UI names a page
+/// rather than passing a URL, so it can't be used to open arbitrary addresses.
+#[tauri::command]
+fn open_link(link: Link) -> Result<(), String> {
+	let url = match link {
+		Link::Repo => REPO_URL,
+		Link::Issues => ISSUES_URL,
+	};
+	let mut child = host::command("xdg-open").arg(url).spawn().map_err(|e| format!("xdg-open: {e}"))?;
+	std::thread::spawn(move || child.wait());
+	Ok(())
 }
 
 #[tauri::command]
@@ -280,6 +319,8 @@ pub fn run() {
 			check_for_update,
 			notify_update,
 			install_update,
+			app_version,
+			open_link,
 			system_status,
 			set_autostart,
 			install_rules
